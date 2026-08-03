@@ -9,9 +9,9 @@ author:
 
 date: "2026-08-10"
 output:
+  html_document: default
   word_document: default
   pdf_document: default
-  html_document: default
 ---
 # import the libraries that need inside the program
 
@@ -392,7 +392,6 @@ for (ch in channels) {
 
 # Regression Modelling
 $$ quantity_sold_liters_kg = \beta_0 + \beta_1 quantity_liters_kg $$
-$$ quantity_sold_liters_kg = \beta_0 + \beta_1 approx_total_revenue_inr + \beta_2 price_per_unit_sold $$
 $$ quantity_sold_liters_kg = \beta_0 + \beta_1 total_value + \beta_2 total_land_area_acres + \beta_3 number_of_cows + \beta_4 shelf_life_days $$
 $$ quantity_sold_liters_kg = \beta_0 + \beta_1 quantity_in_stock_liters_kg + \beta_2 reorder_quantity_liters_kg + \beta_3 sales_channel + \beta_4 storage_condition $$
 
@@ -412,20 +411,16 @@ cat(paste0("Overall Target Baseline Mean: ", round(overall_target_mean, 2),
 # Predictor: quantity_liters_kg
 hyp1_slr_supply     <- lm(quantity_sold_liters_kg ~ quantity_liters_kg, data = df)
 
-# --- Hypothesis 2 (MLR): Commercial Revenue & Realized Pricing ---
-# Predictors: approx_total_revenue_inr, price_per_unit_sold
-hyp2_mlr_revenue    <- lm(quantity_sold_liters_kg ~ approx_total_revenue_inr + price_per_unit_sold, data = df)
-
-# --- Hypothesis 3 (MLR): Pre-Sale Valuation & Farm Assets ---
+# --- Hypothesis 2 (MLR): Pre-Sale Valuation & Farm Assets ---
 # Predictors: total_value, total_land_area_acres, number_of_cows, shelf_life_days
-hyp3_mlr_valuation  <- lm(quantity_sold_liters_kg ~ total_value + 
+hyp2_mlr_valuation  <- lm(quantity_sold_liters_kg ~ total_value + 
                             total_land_area_acres + 
                             number_of_cows + 
                             shelf_life_days, data = df)
 
-# --- Hypothesis 4 (MLR): Inventory Balance & Distribution Channels ---
+# --- Hypothesis 3 (MLR): Inventory Balance & Distribution Channels ---
 # Predictors: quantity_in_stock_liters_kg, reorder_quantity_liters_kg, sales_channel, storage_condition
-hyp4_mlr_inventory  <- lm(quantity_sold_liters_kg ~ quantity_in_stock_liters_kg + 
+hyp3_mlr_inventory  <- lm(quantity_sold_liters_kg ~ quantity_in_stock_liters_kg + 
                             reorder_quantity_liters_kg + 
                             sales_channel + 
                             storage_condition, data = df)
@@ -434,14 +429,11 @@ hyp4_mlr_inventory  <- lm(quantity_sold_liters_kg ~ quantity_in_stock_liters_kg 
 cat("\n--- HYPOTHESIS 1 SUMMARY: Batch Production Capacity (SLR) ---\n")
 print(summary(hyp1_slr_supply))
 
-cat("\n--- HYPOTHESIS 2 SUMMARY: Commercial Revenue & Realized Price (MLR) ---\n")
-print(summary(hyp2_mlr_revenue))
+cat("\n--- HYPOTHESIS 2 SUMMARY: Pre-Sale Valuation & Farm Assets (MLR) ---\n")
+print(summary(hyp2_mlr_valuation))
 
-cat("\n--- HYPOTHESIS 3 SUMMARY: Pre-Sale Valuation & Farm Assets (MLR) ---\n")
-print(summary(hyp3_mlr_valuation))
-
-cat("\n--- HYPOTHESIS 4 SUMMARY: Inventory Balance & Distribution Channels (MLR) ---\n")
-print(summary(hyp4_mlr_inventory))
+cat("\n--- HYPOTHESIS 3 SUMMARY: Inventory Balance & Distribution Channels (MLR) ---\n")
+print(summary(hyp3_mlr_inventory))
 
 # Performance Evaluation Helper
 get_hypothesis_metrics <- function(model, name, dataset) {
@@ -463,13 +455,12 @@ get_hypothesis_metrics <- function(model, name, dataset) {
 # Performance Comparison Table
 hypothesis_comparison <- rbind(
   get_hypothesis_metrics(hyp1_slr_supply,    "Hypothesis 1: Batch Supply (SLR)", df),
-  get_hypothesis_metrics(hyp2_mlr_revenue,   "Hypothesis 2: Revenue & Realized Pricing (MLR)", df),
-  get_hypothesis_metrics(hyp3_mlr_valuation, "Hypothesis 3: Batch Valuation & Farm Assets (MLR)", df),
-  get_hypothesis_metrics(hyp4_mlr_inventory, "Hypothesis 4: Inventory & Distribution Channels (MLR)", df)
+  get_hypothesis_metrics(hyp2_mlr_valuation, "Hypothesis 2: Batch Valuation & Farm Assets (MLR)", df),
+  get_hypothesis_metrics(hyp3_mlr_inventory, "Hypothesis 3: Inventory & Distribution Channels (MLR)", df)
 )
 
 # stargazer
-stargazer(hyp1_slr_supply, hyp2_mlr_revenue, hyp3_mlr_valuation, hyp4_mlr_inventory, type = "text", keep.stat = c("n", "adj.rsq"))
+stargazer(hyp1_slr_supply, hyp2_mlr_valuation, hyp3_mlr_inventory, type = "text", keep.stat = c("n", "adj.rsq"))
 
 cat("\n=================== 4 HYPOTHESES PERFORMANCE EVALUATION TABLE ===================\n")
 print(hypothesis_comparison)
@@ -484,104 +475,110 @@ print(knitr::kable(hypothesis_comparison,
 # Doing regression diagnostics
 
 ```{r echo=FALSE, REGRESSION_DIAGNOSTICS}
-cat("\n=================== DIAGNOSTIC ANALYSIS (HYPOTHESIS 2 MODEL) ===================\n")
+cat("\n=================== REGRESSION DIAGNOSTIC ANALYSIS ===================\n")
 
-diag_model <- hyp2_mlr_revenue
-
-# --- MULTICOLLINEARITY CHECK (VIF) ---
-cat("\n--- Multicollinearity Assessment (Variance Inflation Factor - VIF) ---\n")
-vif_results <- vif(diag_model)
-print(vif_results)
-
-# --- DIAGNOSTIC DATA FRAME ---
-diag_df <- data.frame(
-  fitted           = fitted(diag_model),
-  residuals        = residuals(diag_model),
-  std_residuals    = rstandard(diag_model),
-  sqrt_abs_std_res = sqrt(abs(rstandard(diag_model))),
-  leverage         = hatvalues(diag_model),
-  cooks_d          = cooks.distance(diag_model)
+# List of all models
+diagnostic_models <- list(
+  "Hypothesis 1 (SLR)" = hyp1_slr_supply,
+  "Hypothesis 2 (MLR)" = hyp2_mlr_valuation,
+  "Hypothesis 3 (MLR)" = hyp3_mlr_inventory
 )
 
-# --- INDIVIDUAL DIAGNOSTIC PLOTS ---
-cat("\n=== GENERATING INDIVIDUAL REGRESSION DIAGNOSTIC PLOTS ===\n")
+# Run diagnostics for every model
+for(model_name in names(diagnostic_models)){
 
-# Plot 1: Residuals vs Fitted
-p_diag1 <- ggplot(diag_df, aes(x = fitted, y = residuals)) +
-  geom_point(alpha = 0.5, color = "#1F78B4") +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "red", linewidth = 1) +
-  geom_smooth(method = "loess", color = "darkblue", se = FALSE) +
-  labs(
-    title    = "Diagnostic Plot 1: Residuals vs Fitted",
-    subtitle = "Checks Linearity & Constant Variance (Homoscedasticity)",
-    x        = "Fitted Values",
-    y        = "Residuals"
-  ) +
-  theme_minimal() +
-  theme(plot.title = element_text(face = "bold", size = 12))
+  cat("\n=====================================================\n")
+  cat("Diagnostic Results:", model_name, "\n")
+  cat("=====================================================\n")
 
-print(p_diag1)
+  diag_model <- diagnostic_models[[model_name]]
 
-# Plot 2: Normal Q-Q Plot
-p_diag2 <- ggplot(diag_df, aes(sample = std_residuals)) +
-  stat_qq(color = "#1F78B4", alpha = 0.6) +
-  stat_qq_line(color = "red", linewidth = 1) +
-  labs(
-    title    = "Diagnostic Plot 2: Normal Q-Q",
-    subtitle = "Checks Residual Distribution Spread",
-    x        = "Theoretical Quantiles",
-    y        = "Standardized Residuals"
-  ) +
-  theme_minimal() +
-  theme(plot.title = element_text(face = "bold", size = 12))
+  # ----------------------------
+  # VIF (only applicable for MLR)
+  # ----------------------------
+  if(length(attr(terms(diag_model), "term.labels")) > 1){
 
-print(p_diag2)
+    cat("\n--- Variance Inflation Factor (VIF) ---\n")
+    vif_results <- vif(diag_model)
+    print(vif_results)
 
-# Plot 3: Scale-Location Plot
-p_diag3 <- ggplot(diag_df, aes(x = fitted, y = sqrt_abs_std_res)) +
-  geom_point(alpha = 0.5, color = "#1F78B4") +
-  geom_smooth(method = "loess", color = "red", se = FALSE) +
-  labs(
-    title    = "Diagnostic Plot 3: Scale-Location",
-    subtitle = "Checks Spread of Standardized Residuals Across Fitted Values",
-    x        = "Fitted Values",
-    y        = expression(sqrt("|Standardized Residuals|"))
-  ) +
-  theme_minimal() +
-  theme(plot.title = element_text(face = "bold", size = 12))
+  } else{
 
-print(p_diag3)
+    cat("\n--- VIF ---\n")
+    cat("Not applicable for Simple Linear Regression.\n")
 
-# Plot 4: Residuals vs Leverage
-p_diag4 <- ggplot(diag_df, aes(x = leverage, y = std_residuals)) +
-  geom_point(alpha = 0.5, color = "#1F78B4") +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
-  geom_smooth(method = "loess", color = "darkblue", se = FALSE) +
-  labs(
-    title    = "Diagnostic Plot 4: Residuals vs Leverage",
-    subtitle = "Identifies High-Leverage Observations Across Predictors",
-    x        = "Leverage",
-    y        = "Standardized Residuals"
-  ) +
-  theme_minimal() +
-  theme(plot.title = element_text(face = "bold", size = 12))
+  }
 
-print(p_diag4)
+  # ----------------------------
+  # Diagnostic Data
+  # ----------------------------
+  diag_df <- data.frame(
+    fitted           = fitted(diag_model),
+    residuals        = residuals(diag_model),
+    std_residuals    = rstandard(diag_model),
+    sqrt_abs_std_res = sqrt(abs(rstandard(diag_model))),
+    leverage         = hatvalues(diag_model),
+    cooks_d          = cooks.distance(diag_model)
+  )
 
-# Plot 5: Cook's Distance
-p_diag5 <- ggplot(diag_df, aes(x = seq_along(cooks_d), y = cooks_d)) +
-  geom_bar(stat = "identity", fill = "#1F78B4", width = 0.6) +
-  geom_hline(yintercept = 4 / nrow(diag_df), linetype = "dashed", color = "red", linewidth = 1) +
-  labs(
-    title    = "Diagnostic Plot 5: Cook's Distance",
-    subtitle = "Identifies Individual Influential Observations (Threshold Line: 4/n)",
-    x        = "Observation Index (Row Number)",
-    y        = "Cook's Distance"
-  ) +
-  theme_minimal() +
-  theme(plot.title = element_text(face = "bold", size = 12))
+  # Residuals vs Fitted
+  print(
+    ggplot(diag_df, aes(fitted, residuals)) +
+      geom_point(alpha=.5,color="#1F78B4") +
+      geom_hline(yintercept=0,linetype="dashed",color="red") +
+      geom_smooth(method="loess",se=FALSE,color="darkblue") +
+      labs(title=paste(model_name,"- Residuals vs Fitted"),
+           x="Fitted Values",
+           y="Residuals") +
+      theme_minimal()
+  )
 
-print(p_diag5)
+  # Normal Q-Q
+  print(
+    ggplot(diag_df,aes(sample=std_residuals)) +
+      stat_qq(color="#1F78B4") +
+      stat_qq_line(color="red") +
+      labs(title=paste(model_name,"- Normal Q-Q")) +
+      theme_minimal()
+  )
+
+  # Scale-Location
+  print(
+    ggplot(diag_df,aes(fitted,sqrt_abs_std_res)) +
+      geom_point(alpha=.5,color="#1F78B4") +
+      geom_smooth(method="loess",color="red",se=FALSE) +
+      labs(title=paste(model_name,"- Scale Location"),
+           x="Fitted Values",
+           y=expression(sqrt("|Standardized Residuals|"))) +
+      theme_minimal()
+  )
+
+  # Residuals vs Leverage
+  print(
+    ggplot(diag_df,aes(leverage,std_residuals)) +
+      geom_point(alpha=.5,color="#1F78B4") +
+      geom_hline(yintercept=0,linetype="dashed",color="red") +
+      geom_smooth(method="loess",color="darkblue",se=FALSE) +
+      labs(title=paste(model_name,"- Residuals vs Leverage"),
+           x="Leverage",
+           y="Standardized Residuals") +
+      theme_minimal()
+  )
+
+  # Cook's Distance
+  print(
+    ggplot(diag_df,aes(seq_along(cooks_d),cooks_d)) +
+      geom_col(fill="#1F78B4") +
+      geom_hline(yintercept=4/nrow(diag_df),
+                 color="red",
+                 linetype="dashed") +
+      labs(title=paste(model_name,"- Cook's Distance"),
+           x="Observation",
+           y="Cook's Distance") +
+      theme_minimal()
+  )
+
+}
 ```
 
 # Make a descriptive and hypothesis testing model summary table
@@ -597,31 +594,27 @@ descriptive_summary_table <- data.frame(
     "Hypothesis 1 (SLR)",
     "Hypothesis 2 (MLR)",
     "Hypothesis 3 (MLR)",
-    "Hypothesis 4 (MLR)",
     "Diagnostic Check"
   ),
   Subject = c(
     "Overall Target Column (quantity_sold_liters_kg)",
     "Batch Production Supply (quantity_liters_kg)",
-    "Commercial Revenue & Realized Price (approx_total_revenue_inr + price_per_unit_sold)",
     "Pre-Sale Valuation & Farm Assets (total_value + land_area + cows + shelf_life)",
     "Inventory Balance & Distribution (quantity_in_stock + reorder_qty + sales_channel + storage_condition)",
-    "Multicollinearity Check (Hypothesis 2 MLR)"
+    "Multicollinearity Check"
   ),
   Key_Metric = c(
     paste0("Overall Column Mean = ", round(overall_target_mean, 2), 
            " | Median = ", round(median(df$quantity_sold_liters_kg, na.rm=TRUE), 2), 
            " | SD = ", round(overall_target_sd, 2)),
     paste("R² =", round(summary(hyp1_slr_supply)$r.squared, 4), "| RMSE =", round(rmse(df$quantity_sold_liters_kg, predict(hyp1_slr_supply, df)), 2)),
-    paste("R² =", round(summary(hyp2_mlr_revenue)$r.squared, 4), "| RMSE =", round(rmse(df$quantity_sold_liters_kg, predict(hyp2_mlr_revenue, df)), 2)),
-    paste("R² =", round(summary(hyp3_mlr_valuation)$r.squared, 4), "| RMSE =", round(rmse(df$quantity_sold_liters_kg, predict(hyp3_mlr_valuation, df)), 2)),
-    paste("R² =", round(summary(hyp4_mlr_inventory)$r.squared, 4), "| RMSE =", round(rmse(df$quantity_sold_liters_kg, predict(hyp4_mlr_inventory, df)), 2)),
+    paste("R² =", round(summary(hyp2_mlr_valuation)$r.squared, 4), "| RMSE =", round(rmse(df$quantity_sold_liters_kg, predict(hyp2_mlr_valuation, df)), 2)),
+    paste("R² =", round(summary(hyp3_mlr_inventory)$r.squared, 4), "| RMSE =", round(rmse(df$quantity_sold_liters_kg, predict(hyp3_mlr_inventory, df)), 2)),
     paste("Max VIF =", round(max_vif_val, 2))
   ),
   Analytical_Insight = c(
     "Overall target variable distribution evaluated across all rows in the dataset.",
     "Tests if production batch size directly determines maximum sales output volume.",
-    "Evaluates how total commercial revenue generated interacts with unit selling price.",
     "Evaluates pre-sale estimated batch valuation alongside physical farm assets and product shelf life.",
     "Evaluates remaining stock balance, safety reorder thresholds, cold storage requirements, and sales channels.",
     "Assesses generalized variance inflation factors across realized commercial revenue and transactional selling price."
