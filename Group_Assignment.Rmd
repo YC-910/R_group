@@ -391,6 +391,10 @@ for (ch in channels) {
 ```
 
 # Regression Modelling
+$$ quantity_sold_liters_kg = \beta_0 + \beta_1 quantity_liters_kg $$
+$$ quantity_sold_liters_kg = \beta_0 + \beta_1 approx_total_revenue_inr + \beta_2 price_per_unit_sold $$
+$$ quantity_sold_liters_kg = \beta_0 + \beta_1 total_value + \beta_2 total_land_area_acres + \beta_3 number_of_cows + \beta_4 shelf_life_days $$
+$$ quantity_sold_liters_kg = \beta_0 + \beta_1 quantity_in_stock_liters_kg + \beta_2 reorder_quantity_liters_kg + \beta_3 sales_channel + \beta_4 storage_condition $$
 
 ```{r echo=FALSE, REGRESSION_MODELING}
 cat("\n=================== DIVERSE HYPOTHESIS TESTING MODELS ===================\n")
@@ -408,11 +412,11 @@ cat(paste0("Overall Target Baseline Mean: ", round(overall_target_mean, 2),
 # Predictor: quantity_liters_kg
 hyp1_slr_supply     <- lm(quantity_sold_liters_kg ~ quantity_liters_kg, data = df)
 
-# --- Hypothesis 2 (MLR): Commercial Revenue & Realized Pricing (R² ≈ 0.8140) ---
+# --- Hypothesis 2 (MLR): Commercial Revenue & Realized Pricing ---
 # Predictors: approx_total_revenue_inr, price_per_unit_sold
 hyp2_mlr_revenue    <- lm(quantity_sold_liters_kg ~ approx_total_revenue_inr + price_per_unit_sold, data = df)
 
-# --- Hypothesis 3 (MLR): Pre-Sale Valuation & Farm Assets (R² ≈ 0.2200) ---
+# --- Hypothesis 3 (MLR): Pre-Sale Valuation & Farm Assets ---
 # Predictors: total_value, total_land_area_acres, number_of_cows, shelf_life_days
 hyp3_mlr_valuation  <- lm(quantity_sold_liters_kg ~ total_value + 
                             total_land_area_acres + 
