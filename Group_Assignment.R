@@ -1,0 +1,616 @@
+# ==============================================================================
+# DETAILED R WORKFLOW FOR DAIRY SALES DATASET (DESCRIPTIVE & PREDICTIVE ONLY)
+# Target Variable: quantity_sold_liters_kg
+# Models: 5 Progressive Ordinary Least Squares (OLS) Linear Regressions
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# SECTION 1: LOAD LIBRARIES & SETUP
+# ------------------------------------------------------------------------------
+required_packages <- c("tidyverse", "lubridate", "janitor", "corrplot", "car", 
+                       "gridExtra", "scales", "GGally", "Metrics")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+
+library(tidyverse)  # Data manipulation & ggplot2
+library(lubridate)  # Date parsing functions
+library(janitor)    # Clean variable names
+library(corrplot)   # Correlation matrix visualizations
+library(car)        # Variance Inflation Factor (VIF)
+library(gridExtra)  # Multi-panel graphics
+library(scales)     # Plot formatting scales
+library(Metrics)    # Performance metrics (RMSE, MAE)
+
+set.seed(42) # Ensures reproducibility
+
+# ------------------------------------------------------------------------------
+# SECTION 2: DATA IMPORT, CLEANING, WRANGLING, & INDIVIDUAL BOXPLOTS
+# ------------------------------------------------------------------------------
+
+# 1. Import Raw Data
+df_raw <- read.csv("dairy_dataset.csv", stringsAsFactors = FALSE)
+
+str(df_raw)
+
+# 2. Clean Column Names to Snake Case
+df_clean <- df_raw %>% clean_names()
+
+# --- 2.1 INITIAL DATA QUALITY CHECKS ---
+cat("\n=== 1. DATASET DIMENSIONS (ROWS & COLUMNS) ===\n")
+cat("Rows:", nrow(df_clean), "| Columns:", ncol(df_clean), "\n")
+
+cat("\n=== 2. STRUCTURE & DATA TYPES ===\n")
+glimpse(df_clean)
+
+cat("\n=== 3. DUPLICATE ROW ANALYSIS & REMOVAL ===\n")
+duplicate_count <- sum(duplicated(df_clean))
+cat("Number of duplicate rows found:", duplicate_count, "\n")
+df_clean <- df_clean %>% distinct()
+
+cat("\n=== 4. MISSING VALUE SUMMARY ===\n")
+missing_summary <- df_clean %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Missing_Count") %>%
+  mutate(Missing_Percentage = round((Missing_Count / nrow(df_clean)) * 100, 2)) %>%
+  arrange(desc(Missing_Count))
+
+print(missing_summary)
+
+# --- 2.2 COMPREHENSIVE DATA WRANGLING & FEATURE ENGINEERING ---
+df <- df_clean %>%
+  # Filter out missing target values
+  drop_na(quantity_sold_liters_kg) %>%
+  
+  # Parse Dates safely
+  mutate(
+    date = as.Date(parse_date_time(date, orders = c("d/m/Y", "Y-m-d", "m/d/Y"))),
+    production_date = as.Date(parse_date_time(production_date, orders = c("d/m/Y", "Y-m-d", "m/d/Y"))),
+    expiration_date = as.Date(parse_date_time(expiration_date, orders = c("d/m/Y", "Y-m-d", "m/d/Y")))
+  ) %>%
+  
+  # Categorical Factor Conversions
+  mutate(
+    location = as.factor(location),
+    farm_size = factor(farm_size, levels = c("Small", "Medium", "Large"), ordered = TRUE),
+    product_name = as.factor(product_name),
+    brand = as.factor(brand),
+    storage_condition = as.factor(storage_condition),
+    sales_channel = as.factor(sales_channel),
+    customer_location = as.factor(customer_location)
+  ) %>%
+  
+  # Feature Engineering: Operational Ratios & Durations
+  mutate(
+    days_to_expiration = as.numeric(expiration_date - date),
+    stock_to_reorder_ratio = quantity_in_stock_liters_kg / (reorder_quantity_liters_kg + 1),
+    land_per_cow = total_land_area_acres / (number_of_cows + 1),
+    total_revenue = price_per_unit_sold * quantity_sold_liters_kg,
+    log_quantity_sold = log(quantity_sold_liters_kg + 1)
+  ) %>%
+  
+  # Ensure numerical variables are properly typed
+  mutate(across(c(total_land_area_acres, number_of_cows, price_per_unit_sold,
+                  shelf_life_days, quantity_in_stock_liters_kg,
+                  minimum_stock_threshold_liters_kg, reorder_quantity_liters_kg,
+                  quantity_sold_liters_kg), as.numeric))
+
+# --- 2.3 INDIVIDUAL OUTLIER BOXPLOTS ---
+cat("\n=== 5. GENERATING INDIVIDUAL BOXPLOTS FOR NUMERICAL FEATURES ===\n")
+
+num_cols <- df %>% select(where(is.numeric)) %>% colnames()
+
+for (col in num_cols) {
+  p <- ggplot(df, aes(y = .data[[col]], x = "")) +
+    geom_boxplot(fill = "#4292c6", color = "#084594",
+                 outlier.colour = "red", outlier.shape = 16, outlier.size = 2, alpha = 0.7) +
+    stat_summary(fun = mean, geom = "point", shape = 18, size = 3, color = "black") +
+    labs(
+      title = paste("Outlier Boxplot:", col),
+      subtitle = "Red dots = Outliers (1.5x IQR) | Black diamond = Mean",
+      y = col,
+      x = ""
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 12),
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank()
+    )
+  
+  print(p)
+}
+
+# --- 2.4 NUMERICAL OUTLIER SUMMARY TABLE ---
+cat("\n=== 6. IQR-BASED OUTLIER STATISTICAL SUMMARY ===\n")
+
+outlier_summary <- df %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(cols = everything(), names_to = "Feature", values_to = "Value") %>%
+  group_by(Feature) %>%
+  summarise(
+    Q1 = quantile(Value, 0.25, na.rm = TRUE),
+    Q3 = quantile(Value, 0.75, na.rm = TRUE),
+    IQR = Q3 - Q1,
+    Lower_Bound = Q1 - (1.5 * IQR),
+    Upper_Bound = Q3 + (1.5 * IQR),
+    Outlier_Count = sum(Value < Lower_Bound | Value > Upper_Bound, na.rm = TRUE),
+    Outlier_Percentage = round((Outlier_Count / n()) * 100, 2),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Outlier_Count))
+
+print(outlier_summary)
+
+# ------------------------------------------------------------------------------
+# SECTION 3: EXPLORATORY DATA ANALYSIS (VISUAL DISTRIBUTION & PATTERNS)
+# ------------------------------------------------------------------------------
+
+# --- 3.1 INDIVIDUAL HISTOGRAMS WITH MEAN & MEDIAN LINES ---
+cat("\n=== GENERATING INDIVIDUAL HISTOGRAMS (WITH MEAN & MEDIAN) ===\n")
+
+for (col in num_cols) {
+  mean_val   <- round(mean(df[[col]], na.rm = TRUE), 2)
+  median_val <- round(median(df[[col]], na.rm = TRUE), 2)
+  
+  x_max <- max(df[[col]], na.rm = TRUE)
+  x_min <- min(df[[col]], na.rm = TRUE)
+  x_pos <- x_max - 0.05 * (x_max - x_min)
+  
+  p_hist <- ggplot(df, aes(x = .data[[col]])) +
+    geom_histogram(aes(y = after_stat(density)), bins = 30, fill = "#1F78B4", color = "black", alpha = 0.7) +
+    geom_density(color = "#333333", linewidth = 1) +
+    geom_vline(aes(xintercept = mean_val), color = "#E31A1C", linetype = "dashed", linewidth = 1.2) +
+    geom_vline(aes(xintercept = median_val), color = "#33A02C", linetype = "dotdash", linewidth = 1.2) +
+    annotate(
+      "label", x = x_pos, y = Inf, 
+      label = paste0("Mean: ", mean_val, "\nMedian: ", median_val),
+      hjust = 1, vjust = 1.2, size = 4, fontface = "bold",
+      fill = "#FFFFFF", color = "#333333", label.size = 0.5
+    ) +
+    labs(
+      title = paste("Histogram & Density:", col),
+      subtitle = "Red Dashed = Mean | Green Dot-Dash = Median",
+      x = col,
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 12),
+      plot.subtitle = element_text(size = 10, color = "#555555")
+    )
+  
+  print(p_hist)
+}
+
+# --- 3.2 DISTRIBUTION SUMMARY TABLE (MEAN VS MEDIAN SPREAD) ---
+cat("\n=== NUMERICAL DISTRIBUTION SUMMARY (MEAN VS MEDIAN) ===\n")
+
+distribution_summary <- df %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(cols = everything(), names_to = "Feature", values_to = "Value") %>%
+  group_by(Feature) %>%
+  summarise(
+    Mean           = round(mean(Value, na.rm = TRUE), 2),
+    Median         = round(median(Value, na.rm = TRUE), 2),
+    SD             = round(sd(Value, na.rm = TRUE), 2),
+    IQR            = round(IQR(Value, na.rm = TRUE), 2),
+    Min            = round(min(Value, na.rm = TRUE), 2),
+    Max            = round(max(Value, na.rm = TRUE), 2),
+    Skew_Direction = case_when(
+      abs(Mean - Median) < (0.05 * SD) ~ "Symmetric",
+      Mean > Median                    ~ "Right-skewed",
+      TRUE                             ~ "Left-skewed"
+    ),
+    .groups = "drop"
+  )
+
+print(as_tibble(distribution_summary), n = Inf)
+
+# --- 3.3 FILTERED SCATTER PLOTS (|r| >= 0.3 ONLY) ---
+cat("\n=== GENERATING SCATTER PLOTS (|r| >= 0.3) ===\n")
+
+target_var <- "quantity_sold_liters_kg"
+predictor_cols <- setdiff(num_cols, target_var)
+
+for (x_col in predictor_cols) {
+  cor_val <- cor(df[[x_col]], df[[target_var]], use = "complete.obs")
+  
+  if (!is.na(cor_val) && abs(cor_val) >= 0.3) {
+    cor_pct <- round(cor_val * 100, 2)
+    cor_label <- paste0("Pearson r = ", round(cor_val, 4), " (", cor_pct, "%)")
+    
+    x_pos <- min(df[[x_col]], na.rm = TRUE) + 0.05 * (max(df[[x_col]], na.rm = TRUE) - min(df[[x_col]], na.rm = TRUE))
+    y_pos <- max(df[[target_var]], na.rm = TRUE) * 0.95
+    
+    p_scatter <- ggplot(df, aes(x = .data[[x_col]], y = .data[[target_var]])) +
+      geom_point(alpha = 0.4, color = "#1F78B4") +
+      geom_smooth(method = "lm", color = "#E31A1C", se = TRUE, linewidth = 1.2) +
+      annotate(
+        "label", x = x_pos, y = y_pos, label = cor_label,
+        hjust = 0, vjust = 1, size = 4.5, fontface = "bold",
+        fill = "#FFFFCC", color = "#333333"
+      ) +
+      labs(
+        title = paste("Scatter Plot:", x_col, "vs", target_var),
+        subtitle = "Filtered correlation strength: |r| >= 0.3",
+        x = x_col,
+        y = "Quantity Sold (liters/kg)"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(face = "bold", size = 12),
+        axis.title = element_text(face = "bold")
+      )
+    
+    print(p_scatter)
+  }
+}
+
+# --- 3.4 TARGET & CATEGORICAL FEATURE ANALYSIS ---
+
+# Plot 1: Target Distribution with Mean & Median
+mean_target   <- round(mean(df$quantity_sold_liters_kg, na.rm = TRUE), 2)
+median_target <- round(median(df$quantity_sold_liters_kg, na.rm = TRUE), 2)
+
+plot1 <- ggplot(df, aes(x = quantity_sold_liters_kg)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 35, fill = "#1F78B4", color = "black", alpha = 0.7) +
+  geom_density(color = "#333333", linewidth = 1.2) +
+  geom_vline(xintercept = mean_target, color = "#E31A1C", linetype = "dashed", linewidth = 1.2) +
+  geom_vline(xintercept = median_target, color = "#33A02C", linetype = "dotdash", linewidth = 1.2) +
+  annotate(
+    "label", x = max(df$quantity_sold_liters_kg, na.rm = TRUE) * 0.95, y = Inf, 
+    label = paste0("Mean: ", mean_target, "\nMedian: ", median_target),
+    hjust = 1, vjust = 1.2, size = 4, fontface = "bold",
+    fill = "#FFFFFF", color = "#333333"
+  ) +
+  labs(
+    title = "Plot 1: Distribution of Quantity Sold",
+    subtitle = "Red Dashed = Mean | Green Dot-Dash = Median",
+    x = "Quantity Sold (liters/kg)",
+    y = "Density"
+  ) +
+  theme_minimal()
+print(plot1)
+
+# Plot 2: Farm Size Comparison
+plot2 <- ggplot(df, aes(x = farm_size, y = quantity_sold_liters_kg, fill = farm_size)) +
+  geom_boxplot(alpha = 0.7) +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 3, color = "black") +
+  labs(title = "Plot 2: Quantity Sold by Farm Size", x = "Farm Size", y = "Quantity Sold") +
+  theme_minimal() + theme(legend.position = "none")
+print(plot2)
+
+# Plot 3: Product Name Comparison
+plot3 <- ggplot(df, aes(x = reorder(product_name, quantity_sold_liters_kg, FUN = median), 
+                        y = quantity_sold_liters_kg, fill = product_name)) +
+  geom_boxplot(alpha = 0.8) + coord_flip() +
+  labs(title = "Plot 3: Quantity Sold by Product Name", x = "Product Name", y = "Quantity Sold") +
+  theme_minimal() + theme(legend.position = "none")
+print(plot3)
+
+# Plot 4: Price vs Quantity Sold by Channel
+plot4 <- ggplot(df, aes(x = price_per_unit_sold, y = quantity_sold_liters_kg, color = sales_channel)) +
+  geom_point(alpha = 0.3) + geom_smooth(method = "lm", color = "black") +
+  facet_wrap(~ sales_channel) +
+  labs(title = "Plot 4: Price vs Quantity Sold by Sales Channel", x = "Price per Unit (Sold)", y = "Quantity Sold") +
+  theme_minimal() + theme(legend.position = "none")
+print(plot4)
+
+# Plot 5: Storage Condition vs Sales Channel
+plot5 <- ggplot(df, aes(x = sales_channel, fill = storage_condition)) +
+  geom_bar(position = "fill") + scale_y_continuous(labels = percent) +
+  labs(title = "Plot 5: Storage Conditions across Sales Channels", x = "Sales Channel", y = "Percentage") +
+  theme_minimal()
+print(plot5)
+
+# Plot 6: Quantity in Stock vs Quantity Sold
+plot6 <- ggplot(df, aes(x = quantity_in_stock_liters_kg, y = quantity_sold_liters_kg)) +
+  geom_point(alpha = 0.4, color = "#33A02C") + geom_smooth(method = "lm", color = "darkgreen") +
+  labs(title = "Plot 6: Quantity in Stock vs Quantity Sold", x = "Quantity in Stock", y = "Quantity Sold") +
+  theme_minimal()
+print(plot6)
+
+# ------------------------------------------------------------------------------
+# SECTION 4: CORRELATION ANALYSIS (DESCRIPTIVE & PERCENTAGE BREAKDOWN)
+# ------------------------------------------------------------------------------
+
+num_df <- df %>%
+  select(total_land_area_acres, number_of_cows, price_per_unit_sold, 
+         shelf_life_days, quantity_in_stock_liters_kg, 
+         minimum_stock_threshold_liters_kg, reorder_quantity_liters_kg, 
+         quantity_sold_liters_kg)
+
+# --- 4.2 Target Variable Pairwise Correlations (With Percentages) ---
+cat("\n=== 4.2 TARGET VARIABLE PAIRWISE PEARSON CORRELATIONS (%) ===\n")
+target_cols <- setdiff(colnames(num_df), "quantity_sold_liters_kg")
+
+target_correlations <- lapply(target_cols, function(col_name) {
+  r_val <- cor(num_df[[col_name]], num_df$quantity_sold_liters_kg, use = "complete.obs", method = "pearson")
+  data.frame(
+    Feature                  = col_name,
+    Pearson_r                = round(r_val, 4),
+    Correlation_Pct          = paste0(round(r_val * 100, 2), "%"),
+    Variance_Explained_R2_Pct = paste0(round((r_val^2) * 100, 2), "%"),
+    Strength = case_when(
+      abs(r_val) >= 0.7 ~ "Strong",
+      abs(r_val) >= 0.3 ~ "Moderate",
+      abs(r_val) >= 0.1 ~ "Weak",
+      TRUE              ~ "Negligible"
+    )
+  )
+}) %>% bind_rows() %>% arrange(desc(abs(Pearson_r)))
+
+print(target_correlations)
+
+# --- 4.3 Full Correlation Matrix (%) ---
+cat("\n=== FULL NUMERICAL FEATURE CORRELATION MATRIX (%) ===\n")
+corr_matrix_pct <- round(cor(num_df, use = "pairwise.complete.obs") * 100, 1)
+print(corr_matrix_pct)
+
+# --- 4.4 Spearman Rank Monotonic Correlations ---
+cat("\n=== 4.4 SPEARMAN RANK MONOTONIC CORRELATIONS ===\n")
+spearman_correlations <- lapply(target_cols, function(col_name) {
+  rho_val <- cor(num_df[[col_name]], num_df$quantity_sold_liters_kg, use = "complete.obs", method = "spearman")
+  data.frame(
+    Feature          = col_name,
+    Spearman_rho     = round(rho_val, 4),
+    Spearman_Rho_Pct = paste0(round(rho_val * 100, 2), "%")
+  )
+}) %>% bind_rows() %>% arrange(desc(abs(Spearman_rho)))
+
+print(spearman_correlations)
+
+# --- 4.5 Sub-Group Segmented Correlations (By Sales Channel) ---
+cat("\n=== 4.5 SEGMENTED CORRELATIONS BY SALES CHANNEL ===\n")
+channels <- levels(df$sales_channel)
+
+for (ch in channels) {
+  cat(paste0("\n--- Correlation with Quantity Sold for Sales Channel: ", ch, " ---\n"))
+  sub_data <- df %>% filter(sales_channel == ch) %>% select(all_of(colnames(num_df)))
+  
+  sub_cor_summary <- lapply(target_cols, function(col_name) {
+    r_val <- cor(sub_data[[col_name]], sub_data$quantity_sold_liters_kg, use = "complete.obs")
+    data.frame(
+      Channel         = ch,
+      Feature         = col_name,
+      Pearson_r       = round(r_val, 4),
+      Correlation_Pct = paste0(round(r_val * 100, 2), "%")
+    )
+  }) %>% bind_rows()
+  print(sub_cor_summary)
+}
+
+# ------------------------------------------------------------------------------
+# SECTION 5: REGRESSION MODELING (UNIQUE PREDICTORS & HIGH R² HYPOTHESES)
+# ------------------------------------------------------------------------------
+
+cat("\n=================== DIVERSE HYPOTHESIS TESTING MODELS ===================\n")
+
+df <- df %>% clean_names()
+
+# Target Column Baseline Summary
+overall_target_mean <- mean(df$quantity_sold_liters_kg, na.rm = TRUE)
+overall_target_sd   <- sd(df$quantity_sold_liters_kg, na.rm = TRUE)
+
+cat(paste0("Overall Target Baseline Mean: ", round(overall_target_mean, 2), 
+           " | SD: ", round(overall_target_sd, 2), "\n\n"))
+
+# --- Hypothesis 1 (SLR): Batch Production Supply Capacity ---
+# Predictor: quantity_liters_kg
+hyp1_slr_supply     <- lm(quantity_sold_liters_kg ~ quantity_liters_kg, data = df)
+
+# --- Hypothesis 2 (MLR): Commercial Revenue & Realized Pricing (R² ≈ 0.8140) ---
+# Predictors: approx_total_revenue_inr, price_per_unit_sold
+hyp2_mlr_revenue    <- lm(quantity_sold_liters_kg ~ approx_total_revenue_inr + price_per_unit_sold, data = df)
+
+# --- Hypothesis 3 (MLR): Pre-Sale Valuation & Farm Assets (R² ≈ 0.2200) ---
+# Predictors: total_value, total_land_area_acres, number_of_cows, shelf_life_days
+hyp3_mlr_valuation  <- lm(quantity_sold_liters_kg ~ total_value + 
+                            total_land_area_acres + 
+                            number_of_cows + 
+                            shelf_life_days, data = df)
+
+# --- Hypothesis 4 (MLR): Inventory Balance & Distribution Channels ---
+# Predictors: quantity_in_stock_liters_kg, reorder_quantity_liters_kg, sales_channel, storage_condition
+hyp4_mlr_inventory  <- lm(quantity_sold_liters_kg ~ quantity_in_stock_liters_kg + 
+                            reorder_quantity_liters_kg + 
+                            sales_channel + 
+                            storage_condition, data = df)
+
+# Summaries
+cat("\n--- HYPOTHESIS 1 SUMMARY: Batch Production Capacity (SLR) ---\n")
+print(summary(hyp1_slr_supply))
+
+cat("\n--- HYPOTHESIS 2 SUMMARY: Commercial Revenue & Realized Price (MLR) ---\n")
+print(summary(hyp2_mlr_revenue))
+
+cat("\n--- HYPOTHESIS 3 SUMMARY: Pre-Sale Valuation & Farm Assets (MLR) ---\n")
+print(summary(hyp3_mlr_valuation))
+
+cat("\n--- HYPOTHESIS 4 SUMMARY: Inventory Balance & Distribution Channels (MLR) ---\n")
+print(summary(hyp4_mlr_inventory))
+
+# Performance Evaluation Helper
+get_hypothesis_metrics <- function(model, name, dataset) {
+  preds  <- predict(model, newdata = dataset)
+  acts   <- dataset$quantity_sold_liters_kg
+  f_stat <- summary(model)$fstatistic
+  p_val  <- if(!is.null(f_stat)) pf(f_stat[1], f_stat[2], f_stat[3], lower.tail = FALSE) else NA
+  
+  data.frame(
+    Hypothesis_Model = name,
+    R_Squared        = round(summary(model)$r.squared, 4),
+    Adj_R_Squared    = round(summary(model)$adj.r.squared, 4),
+    p_value          = format.pval(p_val, digits = 3),
+    RMSE             = round(rmse(acts, preds), 2),
+    MAE              = round(mae(acts, preds), 2)
+  )
+}
+
+# Performance Comparison Table
+hypothesis_comparison <- rbind(
+  get_hypothesis_metrics(hyp1_slr_supply,    "Hypothesis 1: Batch Supply (SLR)", df),
+  get_hypothesis_metrics(hyp2_mlr_revenue,   "Hypothesis 2: Revenue & Realized Pricing (MLR)", df),
+  get_hypothesis_metrics(hyp3_mlr_valuation, "Hypothesis 3: Batch Valuation & Farm Assets (MLR)", df),
+  get_hypothesis_metrics(hyp4_mlr_inventory, "Hypothesis 4: Inventory & Distribution Channels (MLR)", df)
+)
+
+cat("\n=================== 4 HYPOTHESES PERFORMANCE EVALUATION TABLE ===================\n")
+print(hypothesis_comparison)
+
+cat("\n--- Formatted Table Output (Knitr) ---\n")
+print(knitr::kable(hypothesis_comparison, 
+                   col.names = c("Hypothesis Model", "R²", "Adj. R²", "p-value", "RMSE", "MAE"),
+                   align = c("l", "c", "c", "c", "r", "r"),
+                   caption = "Performance Summary of Progressive OLS Linear Regression Hypotheses"))
+
+# ------------------------------------------------------------------------------
+# SECTION 6: REGRESSION DIAGNOSTICS (BEST MODEL - HYPOTHESIS 2)
+# ------------------------------------------------------------------------------
+
+cat("\n=================== DIAGNOSTIC ANALYSIS (HYPOTHESIS 2 MODEL) ===================\n")
+
+diag_model <- hyp2_mlr_revenue
+
+# --- MULTICOLLINEARITY CHECK (VIF) ---
+cat("\n--- Multicollinearity Assessment (Variance Inflation Factor - VIF) ---\n")
+vif_results <- vif(diag_model)
+print(vif_results)
+
+# --- DIAGNOSTIC DATA FRAME ---
+diag_df <- data.frame(
+  fitted           = fitted(diag_model),
+  residuals        = residuals(diag_model),
+  std_residuals    = rstandard(diag_model),
+  sqrt_abs_std_res = sqrt(abs(rstandard(diag_model))),
+  leverage         = hatvalues(diag_model),
+  cooks_d          = cooks.distance(diag_model)
+)
+
+# --- INDIVIDUAL DIAGNOSTIC PLOTS ---
+cat("\n=== GENERATING INDIVIDUAL REGRESSION DIAGNOSTIC PLOTS ===\n")
+
+# Plot 1: Residuals vs Fitted
+p_diag1 <- ggplot(diag_df, aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.5, color = "#1F78B4") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", linewidth = 1) +
+  geom_smooth(method = "loess", color = "darkblue", se = FALSE) +
+  labs(
+    title    = "Diagnostic Plot 1: Residuals vs Fitted",
+    subtitle = "Checks Linearity & Constant Variance (Homoscedasticity)",
+    x        = "Fitted Values",
+    y        = "Residuals"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 12))
+
+print(p_diag1)
+
+# Plot 2: Normal Q-Q Plot
+p_diag2 <- ggplot(diag_df, aes(sample = std_residuals)) +
+  stat_qq(color = "#1F78B4", alpha = 0.6) +
+  stat_qq_line(color = "red", linewidth = 1) +
+  labs(
+    title    = "Diagnostic Plot 2: Normal Q-Q",
+    subtitle = "Checks Residual Distribution Spread",
+    x        = "Theoretical Quantiles",
+    y        = "Standardized Residuals"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 12))
+
+print(p_diag2)
+
+# Plot 3: Scale-Location Plot
+p_diag3 <- ggplot(diag_df, aes(x = fitted, y = sqrt_abs_std_res)) +
+  geom_point(alpha = 0.5, color = "#1F78B4") +
+  geom_smooth(method = "loess", color = "red", se = FALSE) +
+  labs(
+    title    = "Diagnostic Plot 3: Scale-Location",
+    subtitle = "Checks Spread of Standardized Residuals Across Fitted Values",
+    x        = "Fitted Values",
+    y        = expression(sqrt("|Standardized Residuals|"))
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 12))
+
+print(p_diag3)
+
+# Plot 4: Residuals vs Leverage
+p_diag4 <- ggplot(diag_df, aes(x = leverage, y = std_residuals)) +
+  geom_point(alpha = 0.5, color = "#1F78B4") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(method = "loess", color = "darkblue", se = FALSE) +
+  labs(
+    title    = "Diagnostic Plot 4: Residuals vs Leverage",
+    subtitle = "Identifies High-Leverage Observations Across Predictors",
+    x        = "Leverage",
+    y        = "Standardized Residuals"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 12))
+
+print(p_diag4)
+
+# Plot 5: Cook's Distance
+p_diag5 <- ggplot(diag_df, aes(x = seq_along(cooks_d), y = cooks_d)) +
+  geom_bar(stat = "identity", fill = "#1F78B4", width = 0.6) +
+  geom_hline(yintercept = 4 / nrow(diag_df), linetype = "dashed", color = "red", linewidth = 1) +
+  labs(
+    title    = "Diagnostic Plot 5: Cook's Distance",
+    subtitle = "Identifies Individual Influential Observations (Threshold Line: 4/n)",
+    x        = "Observation Index (Row Number)",
+    y        = "Cook's Distance"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 12))
+
+print(p_diag5)
+
+# ------------------------------------------------------------------------------
+# SECTION 7: DESCRIPTIVE & HYPOTHESIS MODEL SUMMARY TABLE
+# ------------------------------------------------------------------------------
+cat("\n==============================================================================\n")
+cat("                  DESCRIPTIVE & HYPOTHESIS EVALUATION SUMMARY                 \n")
+cat("==============================================================================\n")
+
+max_vif_val <- if(is.matrix(vif_results)) max(vif_results[,1]) else max(vif_results)
+
+descriptive_summary_table <- data.frame(
+  Analysis_Focus = c(
+    "Target Distribution",
+    "Hypothesis 1 (SLR)",
+    "Hypothesis 2 (MLR)",
+    "Hypothesis 3 (MLR)",
+    "Hypothesis 4 (MLR)",
+    "Diagnostic Check"
+  ),
+  Subject = c(
+    "Overall Target Column (quantity_sold_liters_kg)",
+    "Batch Production Supply (quantity_liters_kg)",
+    "Commercial Revenue & Realized Price (approx_total_revenue_inr + price_per_unit_sold)",
+    "Pre-Sale Valuation & Farm Assets (total_value + land_area + cows + shelf_life)",
+    "Inventory Balance & Distribution (quantity_in_stock + reorder_qty + sales_channel + storage_condition)",
+    "Multicollinearity Check (Hypothesis 2 MLR)"
+  ),
+  Key_Metric = c(
+    paste0("Overall Column Mean = ", round(overall_target_mean, 2), 
+           " | Median = ", round(median(df$quantity_sold_liters_kg, na.rm=TRUE), 2), 
+           " | SD = ", round(overall_target_sd, 2)),
+    paste("R² =", round(summary(hyp1_slr_supply)$r.squared, 4), "| RMSE =", round(rmse(df$quantity_sold_liters_kg, predict(hyp1_slr_supply, df)), 2)),
+    paste("R² =", round(summary(hyp2_mlr_revenue)$r.squared, 4), "| RMSE =", round(rmse(df$quantity_sold_liters_kg, predict(hyp2_mlr_revenue, df)), 2)),
+    paste("R² =", round(summary(hyp3_mlr_valuation)$r.squared, 4), "| RMSE =", round(rmse(df$quantity_sold_liters_kg, predict(hyp3_mlr_valuation, df)), 2)),
+    paste("R² =", round(summary(hyp4_mlr_inventory)$r.squared, 4), "| RMSE =", round(rmse(df$quantity_sold_liters_kg, predict(hyp4_mlr_inventory, df)), 2)),
+    paste("Max VIF =", round(max_vif_val, 2))
+  ),
+  Analytical_Insight = c(
+    "Overall target variable distribution evaluated across all rows in the dataset.",
+    "Tests if production batch size directly determines maximum sales output volume.",
+    "Evaluates how total commercial revenue generated interacts with unit selling price.",
+    "Evaluates pre-sale estimated batch valuation alongside physical farm assets and product shelf life.",
+    "Evaluates remaining stock balance, safety reorder thresholds, cold storage requirements, and sales channels.",
+    "Assesses generalized variance inflation factors across realized commercial revenue and transactional selling price."
+  )
+)
+
+print(as_tibble(descriptive_summary_table), n = Inf)
