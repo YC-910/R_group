@@ -7,15 +7,15 @@ author:
 - Sim Yee Cong (26083154)
 - Yudmila Ismael (26063677)
 
-date: "2026-08-10"
+date: "2026-08-20"
 output:
-  html_document: default
-  word_document: default
   pdf_document: default
+  word_document: default
+  html_document: default
 ---
-# import the libraries that need inside the program
 
 ```{r LOAD LIBRARIES & SETUP, include=FALSE, ehco=FALSE }
+# import the libraries that need inside the program
 required_packages <- c("tidyverse", "lubridate", "janitor", "corrplot", "car", 
                        "gridExtra", "scales", "GGally", "Metrics", "stargazer" )
 new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
