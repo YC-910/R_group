@@ -37,7 +37,7 @@ set.seed(42) # Ensures reproducibility
 
 ```{r echo=FALSE, DATA_IMPORT_CLEANING_WRANGLING}
 # 1. Import Raw Data
-df_raw <- read.csv("dairy_dataset.csv", stringsAsFactors = FALSE)
+df_raw <- read.csv("data/dairy_dataset.csv", stringsAsFactors = FALSE)
 
 cat("IMPORT DATASET")
 str(df_raw)
@@ -153,6 +153,9 @@ print(outlier_summary)
 
 cat("CLEAN DATASET")
 str(df_clean)
+
+cat("CLEAN DATASET WITH FEATURE ENGINEERING")
+str(df)
 
 ```
 
