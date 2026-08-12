@@ -39,7 +39,7 @@ set.seed(42) # Ensures reproducibility
 # 1. Import Raw Data
 df_raw <- read.csv("dairy_dataset.csv", stringsAsFactors = FALSE)
 
-cat("IMPOER DATASET")
+cat("IMPORT DATASET")
 str(df_raw)
 
 # 2. Clean Column Names to Snake Case
