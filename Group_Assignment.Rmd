@@ -9,9 +9,9 @@ author:
 
 date: "2026-08-20"
 output:
-  pdf_document: default
-  word_document: default
   html_document: default
+  word_document: default
+  pdf_document: default
 ---
 
 ```{r LOAD LIBRARIES & SETUP, include=FALSE, ehco=FALSE }
@@ -39,6 +39,7 @@ set.seed(42) # Ensures reproducibility
 # 1. Import Raw Data
 df_raw <- read.csv("dairy_dataset.csv", stringsAsFactors = FALSE)
 
+cat("IMPOER DATASET")
 str(df_raw)
 
 # 2. Clean Column Names to Snake Case
@@ -130,7 +131,7 @@ for (col in num_cols) {
 }
 
 # --- 2.4 NUMERICAL OUTLIER SUMMARY TABLE ---
-cat("\n=== 6. IQR-BASED OUTLIER STATISTICAL SUMMARY ===\n")
+
 
 outlier_summary <- df %>%
   select(where(is.numeric)) %>%
@@ -149,6 +150,10 @@ outlier_summary <- df %>%
   arrange(desc(Outlier_Count))
 
 print(outlier_summary)
+
+cat("CLEAN DATASET")
+str(df_clean)
+
 ```
 
 # Exploratory Data Analysis with the dataset
@@ -409,18 +414,18 @@ cat(paste0("Overall Target Baseline Mean: ", round(overall_target_mean, 2),
 
 # --- Hypothesis 1 (SLR): Batch Production Supply Capacity ---
 # Predictor: quantity_liters_kg
-hyp1_slr_supply     <- lm(quantity_sold_liters_kg ~ quantity_liters_kg, data = df)
+hyp1_slr_supply <- lm(quantity_sold_liters_kg ~ quantity_liters_kg, data = df)
 
 # --- Hypothesis 2 (MLR): Pre-Sale Valuation & Farm Assets ---
 # Predictors: total_value, total_land_area_acres, number_of_cows, shelf_life_days
-hyp2_mlr_valuation  <- lm(quantity_sold_liters_kg ~ total_value + 
+hyp2_mlr_valuation <- lm(quantity_sold_liters_kg ~ total_value + 
                             total_land_area_acres + 
                             number_of_cows + 
                             shelf_life_days, data = df)
 
 # --- Hypothesis 3 (MLR): Inventory Balance & Distribution Channels ---
 # Predictors: quantity_in_stock_liters_kg, reorder_quantity_liters_kg, sales_channel, storage_condition
-hyp3_mlr_inventory  <- lm(quantity_sold_liters_kg ~ quantity_in_stock_liters_kg + 
+hyp3_mlr_inventory <- lm(quantity_sold_liters_kg ~ quantity_in_stock_liters_kg + 
                             reorder_quantity_liters_kg + 
                             sales_channel + 
                             storage_condition, data = df)
@@ -472,7 +477,7 @@ print(knitr::kable(hypothesis_comparison,
                    caption = "Performance Summary of Progressive OLS Linear Regression Hypotheses"))
 ```
 
-# Doing regression diagnostics
+# Regression Diagnostics
 
 ```{r echo=FALSE, REGRESSION_DIAGNOSTICS}
 cat("\n=================== REGRESSION DIAGNOSTIC ANALYSIS ===================\n")
@@ -513,6 +518,7 @@ for(model_name in names(diagnostic_models)){
   # Diagnostic Data
   # ----------------------------
   diag_df <- data.frame(
+    obs_id           = seq_len(nrow(df)),
     fitted           = fitted(diag_model),
     residuals        = residuals(diag_model),
     std_residuals    = rstandard(diag_model),
@@ -521,13 +527,23 @@ for(model_name in names(diagnostic_models)){
     cooks_d          = cooks.distance(diag_model)
   )
 
+  # Identify Top 5 Influential Observations for Plot Labeling
+  threshold <- 4 / nrow(diag_df)
+  top_cooks <- diag_df %>%
+    filter(cooks_d > threshold) %>%
+    arrange(desc(cooks_d)) %>%
+    head(5)
+
+  cat("\n--- Top Influential Observations (Cook's Distance > 4/N) ---\n")
+  print(top_cooks %>% select(obs_id, cooks_d, leverage, std_residuals))
+
   # Residuals vs Fitted
   print(
     ggplot(diag_df, aes(fitted, residuals)) +
-      geom_point(alpha=.5,color="#1F78B4") +
-      geom_hline(yintercept=0,linetype="dashed",color="red") +
-      geom_smooth(method="loess",se=FALSE,color="darkblue") +
-      labs(title=paste(model_name,"- Residuals vs Fitted"),
+      geom_point(alpha=.5, color="#1F78B4") +
+      geom_hline(yintercept=0, linetype="dashed", color="red") +
+      geom_smooth(method="loess", se=FALSE, color="darkblue") +
+      labs(title=paste(model_name, "- Residuals vs Fitted"),
            x="Fitted Values",
            y="Residuals") +
       theme_minimal()
@@ -535,19 +551,19 @@ for(model_name in names(diagnostic_models)){
 
   # Normal Q-Q
   print(
-    ggplot(diag_df,aes(sample=std_residuals)) +
+    ggplot(diag_df, aes(sample=std_residuals)) +
       stat_qq(color="#1F78B4") +
       stat_qq_line(color="red") +
-      labs(title=paste(model_name,"- Normal Q-Q")) +
+      labs(title=paste(model_name, "- Normal Q-Q")) +
       theme_minimal()
   )
 
   # Scale-Location
   print(
-    ggplot(diag_df,aes(fitted,sqrt_abs_std_res)) +
-      geom_point(alpha=.5,color="#1F78B4") +
-      geom_smooth(method="loess",color="red",se=FALSE) +
-      labs(title=paste(model_name,"- Scale Location"),
+    ggplot(diag_df, aes(fitted, sqrt_abs_std_res)) +
+      geom_point(alpha=.5, color="#1F78B4") +
+      geom_smooth(method="loess", color="red", se=FALSE) +
+      labs(title=paste(model_name, "- Scale Location"),
            x="Fitted Values",
            y=expression(sqrt("|Standardized Residuals|"))) +
       theme_minimal()
@@ -555,25 +571,26 @@ for(model_name in names(diagnostic_models)){
 
   # Residuals vs Leverage
   print(
-    ggplot(diag_df,aes(leverage,std_residuals)) +
-      geom_point(alpha=.5,color="#1F78B4") +
-      geom_hline(yintercept=0,linetype="dashed",color="red") +
-      geom_smooth(method="loess",color="darkblue",se=FALSE) +
-      labs(title=paste(model_name,"- Residuals vs Leverage"),
+    ggplot(diag_df, aes(leverage, std_residuals)) +
+      geom_point(alpha=.5, color="#1F78B4") +
+      geom_hline(yintercept=0, linetype="dashed", color="red") +
+      geom_smooth(method="loess", color="darkblue", se=FALSE) +
+      labs(title=paste(model_name, "- Residuals vs Leverage"),
            x="Leverage",
            y="Standardized Residuals") +
       theme_minimal()
   )
 
-  # Cook's Distance
+  # Cook's Distance with Labeled Top Outliers
   print(
-    ggplot(diag_df,aes(seq_along(cooks_d),cooks_d)) +
+    ggplot(diag_df, aes(obs_id, cooks_d)) +
       geom_col(fill="#1F78B4") +
-      geom_hline(yintercept=4/nrow(diag_df),
-                 color="red",
-                 linetype="dashed") +
-      labs(title=paste(model_name,"- Cook's Distance"),
-           x="Observation",
+      geom_hline(yintercept=threshold, color="red", linetype="dashed") +
+      geom_text(data=top_cooks, aes(label=paste("Row", obs_id)), 
+                vjust=-0.5, color="darkred", fontface="bold", size=3.5) +
+      labs(title=paste(model_name, "- Cook's Distance"),
+           subtitle=paste("Red Line = 4/N Threshold (", round(threshold, 5), ")"),
+           x="Observation (Row Number)",
            y="Cook's Distance") +
       theme_minimal()
   )
